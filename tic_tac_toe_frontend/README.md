@@ -2,6 +2,14 @@
 
 This template should help get you started developing with Vue 3 in Vite.
 
+## Tic Tac Toe Stats (local persistence)
+
+This app includes a simple **Statistics** dashboard (total games, wins, draws, rates).
+
+- Stats are persisted to `localStorage` under the key `ttt_stats_v1` (access is guarded with `try/catch` so the game still runs even if storage is unavailable).
+- Stats automatically update **once per finished game** (win or draw).
+- **Reset Statistics** clears the counters and removes the `localStorage` entry **without resetting the current board**.
+
 ## Recommended IDE Setup
 
 [VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).

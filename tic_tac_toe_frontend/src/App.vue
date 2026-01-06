@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useStats } from './composables/useStats'
 
 type Player = 'X' | 'O'
 type CellValue = Player | null
@@ -61,6 +62,46 @@ function canPlayCell(index: number): boolean {
   return !isGameOver.value && board.value[index] === null
 }
 
+/**
+ * Stats:
+ * - Persisted to localStorage (guarded so the game still works if storage is unavailable).
+ * - Updated automatically once per completed game (win/draw).
+ */
+const { stats, xWinRate, oWinRate, drawRate, anyWinRate, load: loadStats, recordOutcome, reset: resetStats } = useStats()
+
+/**
+ * Tracks whether the currently displayed game has already been recorded into stats.
+ * This prevents double-counting when computed state re-evaluates.
+ */
+const hasRecordedThisGame = ref(false)
+
+onMounted(() => {
+  loadStats()
+})
+
+watch(
+  isGameOver,
+  (overNow) => {
+    if (!overNow) {
+      // New game started / board reset -> allow recording again.
+      hasRecordedThisGame.value = false
+      return
+    }
+
+    // Record exactly once when the game transitions to "over".
+    if (hasRecordedThisGame.value) return
+
+    if (winner.value === 'X' || winner.value === 'O') {
+      recordOutcome(winner.value)
+      hasRecordedThisGame.value = true
+    } else if (isDraw.value) {
+      recordOutcome('draw')
+      hasRecordedThisGame.value = true
+    }
+  },
+  { immediate: true },
+)
+
 function playCell(index: number) {
   if (!canPlayCell(index)) return
 
@@ -83,64 +124,109 @@ function resetGame() {
 
 <template>
   <main class="page">
-    <section class="card" aria-label="Tic Tac Toe">
-      <header class="header">
-        <div class="titleWrap">
-          <h1 class="title">Tic Tac Toe</h1>
-          <p class="subtitle">Two players. Take turns. First to three in a row wins.</p>
-        </div>
-
-        <div class="status" role="status" aria-live="polite">
-          <span
-            class="statusPill"
-            :class="{
-              statusPrimary: !winner && !isDraw,
-              statusSuccess: winner,
-              statusSecondary: isDraw,
-            }"
-          >
-            {{ statusText }}
-          </span>
-        </div>
-      </header>
-
-      <div class="boardWrap">
-        <div class="board" role="grid" aria-label="3 by 3 board">
-          <button
-            v-for="(cell, idx) in board"
-            :key="idx"
-            class="cell"
-            type="button"
-            role="gridcell"
-            :aria-label="`Cell ${idx + 1}${cell ? `, ${cell}` : ''}`"
-            :disabled="!canPlayCell(idx)"
-            :class="{
-              cellFilled: cell !== null,
-              cellX: cell === 'X',
-              cellO: cell === 'O',
-              cellWin: isCellWinning(idx),
-            }"
-            @click="playCell(idx)"
-          >
-            <span class="cellValue" aria-hidden="true">{{ cell ?? '' }}</span>
-          </button>
-        </div>
-      </div>
-
-      <footer class="footer">
-        <button class="resetBtn" type="button" @click="resetGame">Reset game</button>
-
-        <div class="legend" aria-label="Legend">
-          <div class="legendItem">
-            <span class="dot dotPrimary" aria-hidden="true"></span>
-            <span>Primary: #3b82f6</span>
+    <section class="layout" aria-label="Tic Tac Toe with Statistics">
+      <!-- Stats panel -->
+      <aside class="statsCard" aria-label="Statistics dashboard">
+        <header class="statsHeader">
+          <div>
+            <h2 class="statsTitle">Statistics</h2>
+            <p class="statsSubtitle">Persisted across refreshes on this device.</p>
           </div>
-          <div class="legendItem">
-            <span class="dot dotSuccess" aria-hidden="true"></span>
-            <span>Success: #06b6d4</span>
+
+          <button class="statsResetBtn" type="button" @click="resetStats">Reset Statistics</button>
+        </header>
+
+        <div class="statsGrid" role="list" aria-label="Game statistics">
+          <div class="statItem" role="listitem">
+            <div class="statLabel">Total games</div>
+            <div class="statValue">{{ stats.totalGames }}</div>
+          </div>
+
+          <div class="statItem" role="listitem">
+            <div class="statLabel">X wins</div>
+            <div class="statValue statPrimary">{{ stats.xWins }}</div>
+            <div class="statCaption">Win rate: {{ xWinRate.toFixed(0) }}%</div>
+          </div>
+
+          <div class="statItem" role="listitem">
+            <div class="statLabel">O wins</div>
+            <div class="statValue statSecondary">{{ stats.oWins }}</div>
+            <div class="statCaption">Win rate: {{ oWinRate.toFixed(0) }}%</div>
+          </div>
+
+          <div class="statItem" role="listitem">
+            <div class="statLabel">Draws</div>
+            <div class="statValue statError">{{ stats.draws }}</div>
+            <div class="statCaption">Draw rate: {{ drawRate.toFixed(0) }}%</div>
           </div>
         </div>
-      </footer>
+
+        <div class="statsFooter">
+          <span class="statsFooterLabel">Overall (non-draw) win rate:</span>
+          <span class="statsFooterValue">{{ anyWinRate.toFixed(0) }}%</span>
+        </div>
+      </aside>
+
+      <!-- Game card -->
+      <section class="card" aria-label="Tic Tac Toe">
+        <header class="header">
+          <div class="titleWrap">
+            <h1 class="title">Tic Tac Toe</h1>
+            <p class="subtitle">Two players. Take turns. First to three in a row wins.</p>
+          </div>
+
+          <div class="status" role="status" aria-live="polite">
+            <span
+              class="statusPill"
+              :class="{
+                statusPrimary: !winner && !isDraw,
+                statusSuccess: winner,
+                statusSecondary: isDraw,
+              }"
+            >
+              {{ statusText }}
+            </span>
+          </div>
+        </header>
+
+        <div class="boardWrap">
+          <div class="board" role="grid" aria-label="3 by 3 board">
+            <button
+              v-for="(cell, idx) in board"
+              :key="idx"
+              class="cell"
+              type="button"
+              role="gridcell"
+              :aria-label="`Cell ${idx + 1}${cell ? `, ${cell}` : ''}`"
+              :disabled="!canPlayCell(idx)"
+              :class="{
+                cellFilled: cell !== null,
+                cellX: cell === 'X',
+                cellO: cell === 'O',
+                cellWin: isCellWinning(idx),
+              }"
+              @click="playCell(idx)"
+            >
+              <span class="cellValue" aria-hidden="true">{{ cell ?? '' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <footer class="footer">
+          <button class="resetBtn" type="button" @click="resetGame">Reset game</button>
+
+          <div class="legend" aria-label="Legend">
+            <div class="legendItem">
+              <span class="dot dotPrimary" aria-hidden="true"></span>
+              <span>Primary: #3b82f6</span>
+            </div>
+            <div class="legendItem">
+              <span class="dot dotSuccess" aria-hidden="true"></span>
+              <span>Success: #06b6d4</span>
+            </div>
+          </div>
+        </footer>
+      </section>
     </section>
   </main>
 </template>
@@ -150,6 +236,7 @@ function resetGame() {
 .page {
   --ttt-primary: #3b82f6;
   --ttt-success: #06b6d4;
+  --ttt-error: #ef4444;
   --ttt-secondary: #64748b;
   --ttt-bg: #f9fafb;
   --ttt-surface: #ffffff;
@@ -166,9 +253,18 @@ function resetGame() {
   color: var(--ttt-text);
 }
 
-.card {
+.layout {
   width: 100%;
-  max-width: 520px;
+  max-width: 900px;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+/* Shared card style */
+.card,
+.statsCard {
   background: var(--ttt-surface);
   border: 1px solid var(--ttt-border);
   border-radius: 16px;
@@ -176,6 +272,120 @@ function resetGame() {
   padding: 1.25rem;
 }
 
+/* Stats panel */
+.statsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.statsTitle {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.statsSubtitle {
+  margin: 0.25rem 0 0 0;
+  color: var(--ttt-secondary);
+  font-size: 0.85rem;
+}
+
+.statsResetBtn {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--ttt-error);
+  font-weight: 700;
+  border-radius: 12px;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.06s ease;
+}
+
+.statsResetBtn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.statsResetBtn:active {
+  transform: translateY(1px);
+}
+
+.statsResetBtn:focus-visible {
+  outline: 3px solid rgba(239, 68, 68, 0.25);
+  outline-offset: 2px;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+.statItem {
+  border: 1px solid var(--ttt-border);
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+  background: rgba(249, 250, 251, 0.65);
+}
+
+.statLabel {
+  color: var(--ttt-secondary);
+  font-size: 0.85rem;
+}
+
+.statValue {
+  margin-top: 0.25rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.statCaption {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--ttt-secondary);
+}
+
+.statPrimary {
+  color: var(--ttt-primary);
+}
+
+.statSecondary {
+  color: var(--ttt-secondary);
+}
+
+.statError {
+  color: var(--ttt-error);
+}
+
+.statsFooter {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--ttt-border);
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.statsFooterLabel {
+  color: var(--ttt-secondary);
+  font-size: 0.85rem;
+}
+
+.statsFooterValue {
+  font-weight: 800;
+}
+
+/* Game */
 .header {
   display: flex;
   gap: 1rem;
@@ -386,8 +596,16 @@ function resetGame() {
   background: var(--ttt-success);
 }
 
+@media (max-width: 820px) {
+  .layout {
+    max-width: 560px;
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 420px) {
-  .card {
+  .card,
+  .statsCard {
     padding: 1rem;
   }
   .legend {
